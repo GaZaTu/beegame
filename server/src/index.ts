@@ -3,8 +3,8 @@ import './fakedomapi'
 import * as http from 'http'
 import * as https from 'https'
 import * as http2 from 'http2'
-// import * as express from 'express'
-// import * as cors from 'cors'
+import * as express from 'express'
+import * as cors from 'cors'
 import * as ws from 'ws'
 import { Server } from 'colyseus'
 // import { monitor } from '@colyseus/monitor'
@@ -40,7 +40,7 @@ const throttleWSServer = (server: ws.Server, latencyRange = [25, 75] as readonly
   }
 }
 
-const createHttpServer = (callback?: (req: http.IncomingMessage | http2.Http2ServerRequest, res: http.ServerResponse | http2.Http2ServerResponse) => void) => {
+const createHttpServer = (callback?: (req: http.IncomingMessage, res: http.ServerResponse) => void) => {
   let server!: http.Server | https.Server // | http2.Http2SecureServer
 
   if (process.env.KEY && process.env.CERT && process.env.CA) {
@@ -72,11 +72,6 @@ const createHttpServer = (callback?: (req: http.IncomingMessage | http2.Http2Ser
 }
 
 const listen = async (httpServer: http.Server | https.Server) => {
-  // const app = express()
-
-  // app.use(cors())
-  // app.use(express.json())
-
   const gameServer = new Server({
     server: httpServer,
   })
@@ -111,9 +106,14 @@ const listen = async (httpServer: http.Server | https.Server) => {
 (async () => {
   try {
     await killPort(PORT, 'tcp')
-  } catch {}
+  } catch { }
 
-  const [httpServer] = createHttpServer()
+  const app = express()
+
+  app.use(cors())
+  app.use(express.json())
+
+  const [httpServer] = createHttpServer(app)
   const gameServer = await listen(httpServer)
 
   process.once('SIGINT', () => gameServer.gracefullyShutdown())
