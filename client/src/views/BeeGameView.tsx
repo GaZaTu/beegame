@@ -326,7 +326,7 @@ const BeeGameView: React.FC = () => {
   }), [])
 
   if (!name || !colorHex) {
-    throw new Error('provide flippin name and colorHex!')
+    throw new Error('provide flippin name and colorHex!!')
   }
 
   const beegame = useBeeGame(name, colorHex)
