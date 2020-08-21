@@ -1,0 +1,40 @@
+{
+  "files.exclude": {
+    "**/node_modules": true,
+    "**/build": true,
+    "**/package-lock.json": true,
+    "**/*.code-workspace": true,
+    "server/.vscode": true,
+    "client/.vscode": true
+  },
+  "restoreTerminals.terminals": [
+    {
+      "splitTerminals": [
+        {
+          "name": "server-b",
+          "commands": ["cd server", "npm run build-watch"]
+        },
+        {
+          "name": "server-d",
+          "commands": ["cd server", "npm run nodemon-js"]
+        },
+        {
+          "name": "client",
+          "commands": ["cd client", "npm run start"]
+        }
+      ]
+    },
+    {
+      "splitTerminals": [
+        {
+          "name": "server terminal",
+          "commands": ["cd server", "npm install"]
+        },
+        {
+          "name": "client terminal",
+          "commands": ["cd client", "npm install"]
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "compilerOptions": {
+    "target": "es2019",
+    "outDir": "build",
+    "module": "commonjs",
+    "inlineSourceMap": true,
+    "strict": true,
+    "noImplicitAny": true,
+    "noImplicitReturns": true,
+    "noImplicitThis": true,
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true,
+    "forceConsistentCasingInFileNames": true,
+    "pretty": true,
+    "declaration": true,
+    "skipLibCheck": true
+  },
+  "include": [
+    "src"
+  ],
+  "exclude": [
+    "src/__tests__"
+  ]
+}
