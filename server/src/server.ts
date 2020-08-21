@@ -194,7 +194,7 @@ class LatencyTracker {
   }
 
   getLatency(sessionId: unknown) {
-    return this._sessionLatencies.get(sessionId) || 50
+    return this._sessionLatencies.get(sessionId) || 0
   }
 
   deleteSession(sessionId: unknown) {

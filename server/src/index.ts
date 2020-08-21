@@ -1,8 +1,10 @@
 import './fakedomapi'
 
 import * as http from 'http'
-import * as express from 'express'
-import * as cors from 'cors'
+import * as https from 'https'
+import * as http2 from 'http2'
+// import * as express from 'express'
+// import * as cors from 'cors'
 import * as ws from 'ws'
 import { Server } from 'colyseus'
 // import { monitor } from '@colyseus/monitor'
@@ -10,6 +12,7 @@ import { Server } from 'colyseus'
 import { BeeGameServerRoom } from './server'
 import * as killPort from 'kill-port'
 import { config } from './dotenv'
+import { readFileSync } from 'fs'
 
 config()
 
@@ -37,20 +40,52 @@ const throttleWSServer = (server: ws.Server, latencyRange = [25, 75] as readonly
   }
 }
 
-const listen = async () => {
-  const app = express()
+const createHttpServer = (callback?: (req: http.IncomingMessage | http2.Http2ServerRequest, res: http.ServerResponse | http2.Http2ServerResponse) => void) => {
+  let server!: http.Server | https.Server // | http2.Http2SecureServer
 
-  app.use(cors())
-  app.use(express.json())
+  if (process.env.KEY && process.env.CERT && process.env.CA) {
+    const httpsConfig = {
+      allowHTTP1: true,
+      key: readFileSync(process.env.KEY),
+      cert: readFileSync(process.env.CERT),
+      ca: [readFileSync(process.env.CA)],
+    }
 
-  const httpServer = http.createServer(app)
+    // server = http2.createSecureServer(httpsConfig, callback)
+    server = https.createServer(httpsConfig, callback)
+  } else {
+    server = http.createServer(callback)
+  }
+
+  const listen = () =>
+    new Promise<() => Promise<void>>(resolve => (
+      server.listen(PORT, HOST, () => (
+        resolve(() => (
+          new Promise<void>((resolve, reject) => (
+            server.close(err => err ? reject(err) : resolve())
+          ))
+        ))
+      ))
+    ))
+
+  return [server, listen] as [typeof server, typeof listen]
+}
+
+const listen = async (httpServer: http.Server | https.Server) => {
+  // const app = express()
+
+  // app.use(cors())
+  // app.use(express.json())
+
   const gameServer = new Server({
     server: httpServer,
   })
 
-  const wsServer = (gameServer.transport as any).wss as ws.Server
+  if (process.env.NODE_ENV !== 'production') {
+    const wsServer = (gameServer.transport as any).wss as ws.Server
 
-  throttleWSServer(wsServer)
+    throttleWSServer(wsServer)
+  }
 
   // register your room handlers
   gameServer.define('beegame', BeeGameServerRoom)
@@ -78,10 +113,11 @@ const listen = async () => {
     await killPort(PORT, 'tcp')
   } catch {}
 
-  const server = await listen()
+  const [httpServer] = createHttpServer()
+  const gameServer = await listen(httpServer)
 
-  process.once('SIGINT', () => server.gracefullyShutdown())
-  process.once('SIGTERM', () => server.gracefullyShutdown())
-  process.once('SIGUSR2', () => server.gracefullyShutdown())
-  process.once('uncaughtException', err => server.gracefullyShutdown(undefined, err))
+  process.once('SIGINT', () => gameServer.gracefullyShutdown())
+  process.once('SIGTERM', () => gameServer.gracefullyShutdown())
+  process.once('SIGUSR2', () => gameServer.gracefullyShutdown())
+  process.once('uncaughtException', err => gameServer.gracefullyShutdown(undefined, err))
 })()

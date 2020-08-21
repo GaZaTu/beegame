@@ -1,6 +1,6 @@
 import delay from './delay'
 
-const retry = async <T>(fn: () => T | Promise<T>, retries = 10, delayMs = 1000) => {
+const retry = async <T>(fn: () => T | Promise<T>, retries = 60, delayMs = 1000) => {
   let previousError: unknown
 
   for (let i = 0; i < retries; i++) {

@@ -179,7 +179,7 @@ const throttleWebSocket = (client: WebSocket, latencyRange = [25, 75] as readonl
 }
 
 class LatencyTracker {
-  private _latency = 50
+  private _latency = 0
   private _previousPing = Date.now()
   private _intervalId = setInterval(() => {
     this._previousPing = Date.now()
@@ -207,11 +207,32 @@ class LatencyTracker {
   }
 }
 
+class LatencyUIElement extends ex.Label {
+  constructor(
+    private _latencyTracker: LatencyTracker,
+  ) {
+    super({
+      x: 10,
+      y: 10,
+      text: '',
+      color: ex.Color.Chartreuse,
+    })
+  }
+
+  onPreUpdate() {
+    this.text = `ping: ${this._latencyTracker.getLatency() / 2} ms`
+  }
+}
+
 const joinBeeGame = async (canvasElement: HTMLCanvasElement, name: string, colorHex: string) => {
-  const client = new Client('ws://localhost:2567')
+  console.log(process.env.REACT_APP_API_WS_URL)
+
+  const client = new Client(process.env.REACT_APP_API_WS_URL)
   const room = await client.joinOrCreate<BeeGameRoomState>('beegame', { name, colorHex })
 
-  throttleWebSocket(room.connection.ws)
+  if (process.env.NODE_ENV !== 'production') {
+    throttleWebSocket(room.connection.ws)
+  }
 
   const engine = new BeeGameClientEngine({
     canvasElement,
@@ -259,6 +280,8 @@ const joinBeeGame = async (canvasElement: HTMLCanvasElement, name: string, color
 
   engine.currentScene.camera.clearAllStrategies()
   engine.currentScene.camera.strategy.lockToActor(engine.player)
+
+  engine.currentScene.addScreenElement(new LatencyUIElement(latencyTracker))
 }
 
 const tryJoinBeeGame = async (canvasElement: HTMLCanvasElement, name: string, colorHex: string) =>
