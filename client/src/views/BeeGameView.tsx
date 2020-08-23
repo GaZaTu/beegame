@@ -145,7 +145,7 @@ export class ClientLocalPlayer extends LocalPlayer {
 
     return () => {
       unsub1()
-      // unsub2()
+      unsub2()
     }
   }
 }
