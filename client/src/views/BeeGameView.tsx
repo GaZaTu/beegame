@@ -45,7 +45,53 @@ class KeyboardSnapshot extends ex.Input.Keyboard {
   }
 }
 
-export class ClientLocalPlayer extends LocalPlayer {
+class ClientLocalPlayerServerGhost extends Player {
+  private _unsubFromState = this.listenToPlayerState()
+
+  constructor(
+    private _source: Player,
+  ) {
+    super({
+      x: 0,
+      y: 0,
+      body: new ex.Body({
+        collider: new ex.Collider({
+          type: ex.CollisionType.PreventCollision,
+          shape: ex.Shape.Box(20, 75),
+        }),
+      }),
+      color: ex.Color.Transparent,
+    }, new PlayerState({
+      name: 'Ghost',
+      colorHex: _source.state.colorHex,
+      pos: new VectorState({ x: 0, y: 0 }),
+      vel: new VectorState({ x: 0, y: 0 }),
+    }))
+  }
+
+  onPostKill(scene: ex.Scene) {
+    super.onPostKill(scene)
+
+    this._unsubFromState()
+  }
+
+  private listenToPlayerState() {
+    const unsub1 = this._source.state.listen('pos', serverPos => {
+      this.pos = VectorState.toVector(serverPos)
+    })
+
+    const unsub2 = this._source.state.listen('vel', vel => {
+      this.vel = VectorState.toVector(vel)
+    })
+
+    return () => {
+      unsub1()
+      unsub2()
+    }
+  }
+}
+
+class ClientLocalPlayer extends LocalPlayer {
   private _room: Room
   private _latencyTracker: LatencyTracker
   private _unsubFromState = this.listenToPlayerState()
@@ -65,6 +111,14 @@ export class ClientLocalPlayer extends LocalPlayer {
 
   protected getInput(engine: ex.Engine) {
     return engine.input
+  }
+
+  onInitialize(engine: ex.Engine) {
+    super.onInitialize(engine)
+
+    if (process.env.NODE_ENV !== 'production') {
+      // this.scene.add(new ClientLocalPlayerServerGhost(this))
+    }
   }
 
   onPreUpdate(engine: ex.Engine, delta: number) {
@@ -91,14 +145,14 @@ export class ClientLocalPlayer extends LocalPlayer {
     this._inputHistory.unshift({ time: Date.now(), keyboard: KeyboardSnapshot.from(keyboard) })
     this._inputHistory.length = this._inputHistory.length < 50 ? this._inputHistory.length : 50
 
-    const now = Date.now() - 100
+    const prevNow = Date.now() - 100
+    const prevKeyboard = this._inputHistory
+      .filter(({ time }) => (prevNow - time) > 0 && (prevNow - time) < (1e3 / 60))
+      .map(({ keyboard }) => keyboard)
+      .find(() => true)
 
-    for (const { time, keyboard } of this._inputHistory) {
-      if ((time - now) < (1e3 / 60)) {
-        super.useKeyboardToMove(keyboard, delta)
-
-        break
-      }
+    if (prevKeyboard) {
+      super.useKeyboardToMove(prevKeyboard, delta)
     }
   }
 
@@ -122,25 +176,25 @@ export class ClientLocalPlayer extends LocalPlayer {
 
   private listenToPlayerState() {
     const unsub1 = this.state.listen('pos', serverPos => {
-      const now = Date.now() - this._latencyTracker.getLatency()
+      const prevNow = Date.now() - this._latencyTracker.getLatency()
+      const prevPos = this._posHistory
+        .filter(({ time }) => (prevNow - time) > 0 && (prevNow - time) < (1e3 / 60))
+        .map(({ pos }) => pos)
+        .find(() => true)
 
-      for (const { time, pos } of this._posHistory) {
-        if ((time - now) < (1e3 / 60)) {
-          const serverPosVector = VectorState.toVector(serverPos)
+      if (prevPos) {
+        const serverPosVector = VectorState.toVector(serverPos)
 
-          if (pos.distance(serverPosVector) > 10) {
-            console.warn(`input prediction error, distance: ${Math.floor(pos.distance(serverPosVector))}`)
+        if (prevPos.distance(serverPosVector) > 10) {
+          console.warn(`input prediction error, distance: ${Math.floor(prevPos.distance(serverPosVector))}`)
 
-            this.pos = serverPosVector
-          }
-
-          break
+          this.pos = serverPosVector
         }
       }
     })
 
     const unsub2 = this.state.listen('vel', vel => {
-      this.vel = VectorState.toVector(vel)
+      // this.vel = VectorState.toVector(vel)
     })
 
     return () => {

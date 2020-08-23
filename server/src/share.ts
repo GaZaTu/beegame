@@ -29,15 +29,24 @@ export class VectorState extends Schema {
   }
 }
 
-export class PlayerState extends Schema {
-  @type('string')
-  name!: string
-  @type('string')
-  colorHex!: string
+class ActorState extends Schema {
   @type(VectorState)
   pos!: VectorState
   @type(VectorState)
   vel!: VectorState
+
+  constructor(data?: Partial<ActorState>) {
+    super()
+
+    Object.assign(this, data)
+  }
+}
+
+export class PlayerState extends ActorState {
+  @type('string')
+  name!: string
+  @type('string')
+  colorHex!: string
 
   constructor(data?: Partial<PlayerState>) {
     super()
@@ -57,13 +66,15 @@ export class BeeGameRoomState extends Schema {
   }
 }
 
-export class ProjectileState extends Schema {
-  @type(VectorState)
-  pos!: VectorState
-  @type(VectorState)
-  vel!: VectorState
+export class ProjectileState extends ActorState {
   @type(PlayerState)
   source!: PlayerState
+
+  constructor(data?: Partial<ProjectileState>) {
+    super()
+
+    Object.assign(this, data)
+  }
 }
 
 export class Projectile extends ex.ParticleEmitter {
@@ -258,7 +269,6 @@ export class Player extends NetworkActor<PlayerState> {
     state: PlayerState,
   ) {
     super({
-      ...config,
       width: 20,
       height: 75,
       body: new ex.Body({
@@ -270,6 +280,7 @@ export class Player extends NetworkActor<PlayerState> {
       color: ex.Color.fromHex(state.colorHex),
       pos: VectorState.toVector(state.pos),
       vel: VectorState.toVector(state.vel),
+      ...config,
     }, state)
 
     this.add(new Nameplate({ y: 0 - (this.height / 2) }, state))

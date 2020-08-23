@@ -267,7 +267,7 @@ export class BeeGameServerRoom extends Room<BeeGameRoomState> {
   }
 
   onDispose() {
-    this.log(`.onDispose() // roomId: ${this.roomId}, roomName: ${this.roomName}`)
+    this.log(`.onDispose()`)
 
     this._engine.stop()
     this._latencyTracker.stop()
