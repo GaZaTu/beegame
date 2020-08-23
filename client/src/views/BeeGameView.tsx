@@ -1,21 +1,56 @@
 import React, { useRef, useEffect, useMemo } from 'react'
 import * as ex from 'excalibur'
 import { Client, Room } from 'colyseus.js'
-import { BeeGameRoomState, Player, LocalPlayer, Level, BeeGame, PlayerState, VectorState } from 'server'
+import { BeeGameRoomState, Player, LocalPlayer, Level, BeeGame, PlayerState, VectorState, NetEvents } from 'server'
 import retry from '../lib/retry'
 
-export class ClientLocalPlayer extends LocalPlayer {
-  private static KEYS_TO_WATCH = [
-    ex.Input.Keys.Left,
-    ex.Input.Keys.Right,
-    ex.Input.Keys.Up,
-    ex.Input.Keys.Space,
-  ]
+interface PrivateKeyboardFields {
+  readonly _keys: ex.Input.Keys[]
+  readonly _keysUp: ex.Input.Keys[]
+  readonly _keysDown: ex.Input.Keys[]
+}
 
+class KeyboardSnapshot extends ex.Input.Keyboard {
+  constructor(
+    private _snapshot: PrivateKeyboardFields,
+  ) {
+    super()
+  }
+
+  static from(keyboard: ex.Input.Keyboard) {
+    const { _keys, _keysUp, _keysDown } = keyboard as unknown as PrivateKeyboardFields
+    const snapshot = { _keys, _keysUp, _keysDown }
+
+    return new KeyboardSnapshot(JSON.parse(JSON.stringify(snapshot)))
+  }
+
+  init() { }
+
+  update() { }
+
+  getKeys() {
+    return this._snapshot._keys
+  }
+
+  wasPressed(key: ex.Input.Keys) {
+    return this._snapshot._keysDown.includes(key)
+  }
+
+  wasReleased(key: ex.Input.Keys) {
+    return this._snapshot._keysUp.includes(key)
+  }
+
+  isHeld(key: ex.Input.Keys) {
+    return this._snapshot._keys.includes(key)
+  }
+}
+
+export class ClientLocalPlayer extends LocalPlayer {
   private _room: Room
   private _latencyTracker: LatencyTracker
   private _unsubFromState = this.listenToPlayerState()
   private _posHistory = [] as { time: number, pos: ex.Vector }[]
+  private _inputHistory = [] as { time: number, keyboard: ex.Input.Keyboard }[]
 
   constructor(
     config: ex.ActorArgs,
@@ -33,10 +68,10 @@ export class ClientLocalPlayer extends LocalPlayer {
   }
 
   onPreUpdate(engine: ex.Engine, delta: number) {
-    // super.onPreUpdate(engine, delta)
+    super.onPreUpdate(engine, delta)
 
-    this.sendPressedKeysToServer(engine, delta)
-    this.sendReleasedKeysToServer(engine, delta)
+    this.sendPressedKeysToServer(this.getKeyboard(engine))
+    this.sendReleasedKeysToServer(this.getKeyboard(engine))
   }
 
   onPostUpdate(engine: ex.Engine, delta: number) {
@@ -52,21 +87,36 @@ export class ClientLocalPlayer extends LocalPlayer {
     this._unsubFromState()
   }
 
-  async sendPressedKeysToServer(engine: ex.Engine, delta: number) {
-    const keys = ClientLocalPlayer.KEYS_TO_WATCH
-      .filter(key => this.getInput(engine).keyboard.wasPressed(key))
+  useKeyboardToMove(keyboard: ex.Input.Keyboard, delta: number) {
+    this._inputHistory.unshift({ time: Date.now(), keyboard: KeyboardSnapshot.from(keyboard) })
+    this._inputHistory.length = this._inputHistory.length < 50 ? this._inputHistory.length : 50
 
-    if (keys.length > 0) {
-      this._room.send('input.keyboard.keydown', { keys })
+    const now = Date.now() - 100
+
+    for (const { time, keyboard } of this._inputHistory) {
+      if ((time - now) < (1e3 / 60)) {
+        super.useKeyboardToMove(keyboard, delta)
+
+        break
+      }
     }
   }
 
-  async sendReleasedKeysToServer(engine: ex.Engine, delta: number) {
-    const keys = ClientLocalPlayer.KEYS_TO_WATCH
-      .filter(key => this.getInput(engine).keyboard.wasReleased(key))
+  async sendPressedKeysToServer(keyboard: ex.Input.Keyboard) {
+    const keys = LocalPlayer.KEYS_TO_WATCH
+      .filter(key => keyboard.wasPressed(key))
 
     if (keys.length > 0) {
-      this._room.send('input.keyboard.keyup', { keys })
+      this._room.send(NetEvents.KEYDOWN, { keys })
+    }
+  }
+
+  async sendReleasedKeysToServer(keyboard: ex.Input.Keyboard) {
+    const keys = LocalPlayer.KEYS_TO_WATCH
+      .filter(key => keyboard.wasReleased(key))
+
+    if (keys.length > 0) {
+      this._room.send(NetEvents.KEYUP, { keys })
     }
   }
 
@@ -76,12 +126,10 @@ export class ClientLocalPlayer extends LocalPlayer {
 
       for (const { time, pos } of this._posHistory) {
         if ((time - now) < (1e3 / 60)) {
-          // console.log(`verifying input prediction: ${Date.now() - time} ms ago`)
-
           const serverPosVector = VectorState.toVector(serverPos)
 
-          if (pos.distance(serverPosVector) > 25) {
-            // console.log(`input prediction error, distance: ${pos.distance(serverPosVector)}`)
+          if (pos.distance(serverPosVector) > 10) {
+            console.warn(`input prediction error, distance: ${Math.floor(pos.distance(serverPosVector))}`)
 
             this.pos = serverPosVector
           }
@@ -103,15 +151,19 @@ export class ClientLocalPlayer extends LocalPlayer {
 }
 
 export class NetworkPlayer extends Player {
+  private _latencyTracker: LatencyTracker
   private _unsubFromState = this.listenToPlayerState()
 
   constructor(
     config: ex.ActorArgs,
     state: PlayerState,
+    { latencyTracker }: { latencyTracker: LatencyTracker },
   ) {
     super({
       ...config,
     }, state)
+
+    this._latencyTracker = latencyTracker
   }
 
   onPostKill(scene: ex.Scene) {
@@ -122,11 +174,11 @@ export class NetworkPlayer extends Player {
 
   private listenToPlayerState() {
     const unsub1 = this.state.listen('pos', pos => {
-      this.actions.easeTo(pos.x, pos.y, 1e3 / 60)
+      setTimeout(() => this.actions.easeTo(pos.x, pos.y, 1e3 / 60), 100 - this._latencyTracker.getLatency())
     })
 
     const unsub2 = this.state.listen('vel', vel => {
-      this.vel = VectorState.toVector(vel)
+      setTimeout(() => this.vel = VectorState.toVector(vel), 100 - this._latencyTracker.getLatency())
     })
 
     return () => {
@@ -183,18 +235,18 @@ class LatencyTracker {
   private _previousPing = Date.now()
   private _intervalId = setInterval(() => {
     this._previousPing = Date.now()
-    this._room.send('ping', undefined)
+    this._room.send(NetEvents.PING)
   }, 5000)
 
   constructor(
     private _room: Room,
   ) {
-    this._room.onMessage('pong', () => {
+    this._room.onMessage(NetEvents.PONG, () => {
       this._latency = Date.now() - this._previousPing
     })
 
-    this._room.onMessage('ping', () => {
-      this._room.send('pong')
+    this._room.onMessage(NetEvents.PING, () => {
+      this._room.send(NetEvents.PONG)
     })
   }
 
@@ -225,8 +277,6 @@ class LatencyUIElement extends ex.Label {
 }
 
 const joinBeeGame = async (canvasElement: HTMLCanvasElement, name: string, colorHex: string) => {
-  console.log(process.env.REACT_APP_API_WS_URL)
-
   const client = new Client(process.env.REACT_APP_API_WS_URL)
   const room = await client.joinOrCreate<BeeGameRoomState>('beegame', { name, colorHex })
 
@@ -259,7 +309,7 @@ const joinBeeGame = async (canvasElement: HTMLCanvasElement, name: string, color
       if (sessionId === room.sessionId) {
         return new ClientLocalPlayer({}, playerState, { room, latencyTracker })
       } else {
-        return new NetworkPlayer({}, playerState)
+        return new NetworkPlayer({}, playerState, { latencyTracker })
       }
     })()
 
@@ -271,7 +321,7 @@ const joinBeeGame = async (canvasElement: HTMLCanvasElement, name: string, color
   }
 
   roomState.players.onAdd = (playerState, sessionId) => {
-    engine.players[sessionId] = new NetworkPlayer({}, playerState)
+    engine.players[sessionId] = new NetworkPlayer({}, playerState, { latencyTracker })
   }
 
   roomState.players.onRemove = (playerState, sessionId) => {

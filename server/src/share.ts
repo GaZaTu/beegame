@@ -1,6 +1,13 @@
 import { Schema, type, MapSchema } from '@colyseus/schema'
 import * as ex from 'excalibur'
 
+export enum NetEvents {
+  PING,
+  PONG,
+  KEYDOWN,
+  KEYUP,
+}
+
 export class VectorState extends Schema {
   @type('number')
   x!: number
@@ -290,25 +297,40 @@ export class Player extends NetworkActor<PlayerState> {
 }
 
 export abstract class LocalPlayer extends Player {
+  static KEYS_TO_WATCH = [
+    ex.Input.Keys.Left,
+    ex.Input.Keys.Right,
+    ex.Input.Keys.Up,
+    ex.Input.Keys.Space,
+  ]
+
   protected abstract getInput(engine: ex.Engine): ex.Input.EngineInput
+
+  protected getKeyboard(engine: ex.Engine) {
+    return this.getInput(engine).keyboard
+  }
 
   onPreUpdate(engine: ex.Engine, delta: number) {
     super.onPreUpdate(engine, delta)
 
+    this.useKeyboardToMove(this.getKeyboard(engine), 15)
+  }
+
+  useKeyboardToMove(keyboard: ex.Input.Keyboard, delta: number) {
     this.vel.x = 0
 
-    if (this.getInput(engine).keyboard.isHeld(ex.Input.Keys.Left)) {
+    if (keyboard.isHeld(ex.Input.Keys.Left)) {
       this.vel.x = (10 * delta) * -1
-    } else if (this.getInput(engine).keyboard.isHeld(ex.Input.Keys.Right)) {
+    } else if (keyboard.isHeld(ex.Input.Keys.Right)) {
       this.vel.x = 10 * delta
     }
 
-    if (this.getInput(engine).keyboard.wasPressed(ex.Input.Keys.Up) && this._onGround) {
+    if (keyboard.wasPressed(ex.Input.Keys.Up) && this._onGround) {
       this._onGround = false
       this.vel.y = (25 * delta) * -1
     }
 
-    if (this.getInput(engine).keyboard.wasPressed(ex.Input.Keys.Space)) {}
+    if (keyboard.wasPressed(ex.Input.Keys.Space)) { }
   }
 }
 

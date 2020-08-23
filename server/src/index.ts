@@ -98,7 +98,7 @@ const listen = async (httpServer: http.Server | https.Server) => {
 
   await gameServer.listen(PORT, HOST)
 
-  console.log(`Listening on ws://${HOST}:${PORT}`)
+  console.log(`Listening on ${httpServer instanceof http.Server ? 'ws' : 'wss'}://${HOST}:${PORT}`)
 
   return gameServer
 }

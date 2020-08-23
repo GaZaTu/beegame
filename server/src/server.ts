@@ -1,5 +1,5 @@
 import * as ex from 'excalibur'
-import { LocalPlayer, Level, BeeGame, BeeGameRoomState, VectorState, PlayerState } from './share'
+import { LocalPlayer, Level, BeeGame, BeeGameRoomState, VectorState, PlayerState, NetEvents } from './share'
 import { Room, Client } from 'colyseus'
 
 class NetworkKeyboard {
@@ -16,7 +16,7 @@ class NetworkKeyboard {
   constructor(
     private _room: Room,
   ) {
-    this._room.onMessage('input.keyboard.keydown', (client, { keys }) => {
+    this._room.onMessage(NetEvents.KEYDOWN, (client, { keys }) => {
       for (const key of keys) {
         const clientsThatHoldKey = this._keys.get(key)!
         const clientsThatPressedKey = this._keysDown.get(key)!
@@ -28,7 +28,7 @@ class NetworkKeyboard {
       }
     })
 
-    this._room.onMessage('input.keyboard.keyup', (client, { keys }) => {
+    this._room.onMessage(NetEvents.KEYUP, (client, { keys }) => {
       for (const key of keys) {
         const clientsThatHoldKey = this._keys.get(key)!
         const clientsThatReleasedKey = this._keysUp.get(key)!
@@ -178,18 +178,18 @@ class LatencyTracker {
   private _previousPing = Date.now()
   private _intervalId = setInterval(() => {
     this._previousPing = Date.now()
-    this._room.broadcast('ping')
+    this._room.broadcast(NetEvents.PING)
   }, 5000)
 
   constructor(
     private _room: Room,
   ) {
-    this._room.onMessage('pong', client => {
+    this._room.onMessage(NetEvents.PONG, client => {
       this._sessionLatencies.set(client.sessionId, Date.now() - this._previousPing)
     })
 
-    this._room.onMessage('ping', client => {
-      client.send('pong')
+    this._room.onMessage(NetEvents.PING, client => {
+      client.send(NetEvents.PONG)
     })
   }
 
