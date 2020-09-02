@@ -3,6 +3,7 @@ import * as ex from 'excalibur'
 import { Client, Room } from 'colyseus.js'
 import { BeeGameRoomState, Player, LocalPlayer, Level, BeeGame, PlayerState, VectorState, NetEvents } from 'server'
 import retry from '../lib/retry'
+import { WebRTCClient } from '../lib/colyseus-wrtc'
 
 interface PrivateKeyboardFields {
   readonly _keys: ex.Input.Keys[]
@@ -117,7 +118,7 @@ class ClientLocalPlayer extends LocalPlayer {
     super.onInitialize(engine)
 
     if (process.env.NODE_ENV !== 'production') {
-      // this.scene.add(new ClientLocalPlayerServerGhost(this))
+      this.scene.add(new ClientLocalPlayerServerGhost(this))
     }
   }
 
@@ -145,7 +146,7 @@ class ClientLocalPlayer extends LocalPlayer {
     this._inputHistory.unshift({ time: Date.now(), keyboard: KeyboardSnapshot.from(keyboard) })
     this._inputHistory.length = this._inputHistory.length < 50 ? this._inputHistory.length : 50
 
-    const prevNow = Date.now() - 100
+    const prevNow = Date.now() - (this._latencyTracker.getLatency() || 100) / 2
     const prevKeyboard = this._inputHistory
       .filter(({ time }) => (prevNow - time) > 0 && (prevNow - time) < (1e3 / 60))
       .map(({ keyboard }) => keyboard)
@@ -188,7 +189,7 @@ class ClientLocalPlayer extends LocalPlayer {
         if (prevPos.distance(serverPosVector) > 10) {
           console.warn(`input prediction error, distance: ${Math.floor(prevPos.distance(serverPosVector))}`)
 
-          this.pos = serverPosVector
+          // this.pos = serverPosVector
         }
       }
     })
@@ -331,11 +332,13 @@ class LatencyUIElement extends ex.Label {
 }
 
 const joinBeeGame = async (canvasElement: HTMLCanvasElement, name: string, colorHex: string) => {
-  const client = new Client(process.env.REACT_APP_API_WS_URL)
+  const client = new WebRTCClient(process.env.REACT_APP_API_WS_URL)
   const room = await client.joinOrCreate<BeeGameRoomState>('beegame', { name, colorHex })
 
   if (process.env.NODE_ENV !== 'production') {
-    throttleWebSocket(room.connection.ws)
+    if (room.connection.ws instanceof WebSocket) {
+      throttleWebSocket(room.connection.ws)
+    }
   }
 
   const engine = new BeeGameClientEngine({
@@ -344,7 +347,11 @@ const joinBeeGame = async (canvasElement: HTMLCanvasElement, name: string, color
   })
   engine.start()
 
-  room.connection.ws.addEventListener('close', ({ reason, wasClean }) => {
+  const onclose = room.connection.onclose
+
+  room.connection.onclose = function (ev) {
+    const { reason, wasClean } = ev
+
     engine.stop()
 
     if (wasClean) {
@@ -352,7 +359,11 @@ const joinBeeGame = async (canvasElement: HTMLCanvasElement, name: string, color
     }
 
     tryJoinBeeGame(canvasElement, name, colorHex)
-  })
+
+    if (onclose) {
+      onclose.apply(this, [ev])
+    }
+  }
 
   const latencyTracker = new LatencyTracker(room)
 
@@ -389,7 +400,7 @@ const joinBeeGame = async (canvasElement: HTMLCanvasElement, name: string, color
 }
 
 const tryJoinBeeGame = async (canvasElement: HTMLCanvasElement, name: string, colorHex: string) =>
-  retry(() => joinBeeGame(canvasElement, name, colorHex))
+  retry(() => joinBeeGame(canvasElement, name, colorHex), 1)
 
 const useBeeGame = (name: string, colorHex: string) => {
   const canvas = useRef<HTMLCanvasElement>(null)

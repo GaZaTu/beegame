@@ -13,6 +13,7 @@ import { BeeGameServerRoom } from './server'
 import * as killPort from 'kill-port'
 import { config } from './dotenv'
 import { readFileSync } from 'fs'
+import { WebRTCServer } from './colyseus-wrtc'
 
 config()
 
@@ -72,14 +73,16 @@ const createHttpServer = (callback?: (req: http.IncomingMessage, res: http.Serve
 }
 
 const listen = async (httpServer: http.Server | https.Server) => {
-  const gameServer = new Server({
+  const gameServer = new WebRTCServer({
     server: httpServer,
   })
 
   if (process.env.NODE_ENV !== 'production') {
     const wsServer = (gameServer.transport as any).wss as ws.Server
 
-    throttleWSServer(wsServer)
+    if (wsServer instanceof ws.Server) {
+      throttleWSServer(wsServer)
+    }
   }
 
   // register your room handlers
