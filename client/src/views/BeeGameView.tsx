@@ -146,7 +146,7 @@ class ClientLocalPlayer extends LocalPlayer {
     this._inputHistory.unshift({ time: Date.now(), keyboard: KeyboardSnapshot.from(keyboard) })
     this._inputHistory.length = this._inputHistory.length < 50 ? this._inputHistory.length : 50
 
-    const prevNow = Date.now() - (this._latencyTracker.getLatency() || 100) / 2
+    const prevNow = Date.now() - 100
     const prevKeyboard = this._inputHistory
       .filter(({ time }) => (prevNow - time) > 0 && (prevNow - time) < (1e3 / 60))
       .map(({ keyboard }) => keyboard)
@@ -189,7 +189,7 @@ class ClientLocalPlayer extends LocalPlayer {
         if (prevPos.distance(serverPosVector) > 10) {
           console.warn(`input prediction error, distance: ${Math.floor(prevPos.distance(serverPosVector))}`)
 
-          // this.pos = serverPosVector
+          this.pos = serverPosVector
         }
       }
     })
@@ -208,6 +208,8 @@ class ClientLocalPlayer extends LocalPlayer {
 export class NetworkPlayer extends Player {
   private _latencyTracker: LatencyTracker
   private _unsubFromState = this.listenToPlayerState()
+  private _posHistory = [] as { time: number, pos: ex.Vector }[]
+  private _velHistory = [] as { time: number, vel: ex.Vector }[]
 
   constructor(
     config: ex.ActorArgs,
@@ -229,16 +231,40 @@ export class NetworkPlayer extends Player {
 
   private listenToPlayerState() {
     const unsub1 = this.state.listen('pos', pos => {
-      setTimeout(() => this.actions.easeTo(pos.x, pos.y, 1e3 / 60), 100 - this._latencyTracker.getLatency())
+      this._posHistory.unshift({ time: Date.now(), pos: VectorState.toVector(pos).clone() })
+      this._posHistory.length = this._posHistory.length < 50 ? this._posHistory.length : 50
     })
 
     const unsub2 = this.state.listen('vel', vel => {
-      setTimeout(() => this.vel = VectorState.toVector(vel), 100 - this._latencyTracker.getLatency())
+      this._velHistory.unshift({ time: Date.now(), vel: VectorState.toVector(vel).clone() })
+      this._velHistory.length = this._velHistory.length < 50 ? this._velHistory.length : 50
     })
 
     return () => {
       unsub1()
       unsub2()
+    }
+  }
+
+  onPreUpdate(engine: ex.Engine, delta: number) {
+    super.onPreUpdate(engine, delta)
+
+    const prevNow = Date.now() - this._latencyTracker.getLatency()
+    const prevPos = this._posHistory
+      .filter(({ time }) => (prevNow - time) > 0 && (prevNow - time) < (1e3 / 60))
+      .map(({ pos }) => pos)
+      .find(() => true)
+    const prevVel = this._velHistory
+      .filter(({ time }) => (prevNow - time) > 0 && (prevNow - time) < (1e3 / 60))
+      .map(({ vel }) => vel)
+      .find(() => true)
+
+    if (prevPos) {
+      this.pos = prevPos
+    }
+
+    if (prevVel) {
+      this.vel = prevVel
     }
   }
 }

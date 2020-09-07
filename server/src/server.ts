@@ -7,7 +7,7 @@ class NetworkKeyboard {
     constructor() {
       super(Object.values(ex.Input.Keys).map(k => [k as ex.Input.Keys, new Set<unknown>()]))
     }
-  }
+  } //
 
   private _keys = new NetworkKeyboard.KeyToSessionMap()
   private _keysDown = new NetworkKeyboard.KeyToSessionMap()

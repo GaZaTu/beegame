@@ -1,4 +1,5 @@
 import { EventEmitter } from 'events'
+import * as gl from 'gl'
 
 const createLoggingProxy = <T>(o: T) =>
   new Proxy(o as any, {
@@ -119,6 +120,8 @@ class FakeHTMLCanvasElement extends FakeHTMLElement {
     switch (contextId) {
       case '2d':
         return new FakeCanvasRenderingContext2D(this as any)
+      case 'webgl':
+        return gl(0, 0, options)
     }
 
     return undefined as any

@@ -327,6 +327,14 @@ export abstract class LocalPlayer extends Player {
     this.useKeyboardToMove(this.getKeyboard(engine), 15)
   }
 
+  onPostUpdate(engine: ex.Engine, delta: number) {
+    super.onPostUpdate(engine, delta)
+
+    // if (this.pos.distance(this.oldPos) > 1) {
+    //   console.log({ x: this.pos.x, y: this.pos.y })
+    // }
+  }
+
   useKeyboardToMove(keyboard: ex.Input.Keyboard, delta: number) {
     this.vel.x = 0
 

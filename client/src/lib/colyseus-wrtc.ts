@@ -3,32 +3,32 @@ import { Connection } from 'colyseus.js/lib/Connection'
 import { SchemaConstructor } from 'colyseus.js/lib/serializer/SchemaSerializer'
 import { post } from '@colyseus/http'
 import { MatchMakeError } from 'colyseus.js/lib/Client'
+import { RTCOfferingDataChannelPeerConnection } from './wrtc-client'
 
 class WebRTCConnection {
   static PING = 1
   static PONG = 2
 
   constructor(
-    public connection: RTCPeerConnection,
-    public channel: RTCDataChannel,
+    public connection: RTCOfferingDataChannelPeerConnection,
   ) {
-    this.channel.onmessage = ev => {
+    this.connection.channel!.onmessage = ev => {
       if (this.onmessage) {
         this.onmessage!.apply(undefined as any, [ev])
       }
 
       if (new Uint8Array(ev.data)[0] === WebRTCConnection.PING) {
-        this.channel.send(new Uint8Array([WebRTCConnection.PONG]))
+        this.connection.channel!.send(new Uint8Array([WebRTCConnection.PONG]))
       }
     }
 
-    this.channel.onclose = ev => {
+    this.connection.channel!.onclose = ev => {
       if (this.onclose) {
         this.onclose!.apply(undefined as any, [Object.assign(ev, { code: 0, reason: '' }) as any])
       }
     }
 
-    this.channel.onerror = ev => {
+    this.connection.channel!.onerror = ev => {
       if (this.onerror) {
         this.onerror!.apply(undefined as any, [ev])
       }
@@ -46,19 +46,19 @@ class WebRTCConnection {
       data = new Uint8Array(data)
     }
 
-    this.channel.send(data)
+    this.connection.channel!.send(data)
   }
 
   close() {
-    this.channel.close()
+    this.connection.channel!.close()
   }
 }
 
 class WebRTCRoom<T> extends Room<T> {
-  constructor(name: string, rootSchema: SchemaConstructor<T> | undefined, connection: RTCPeerConnection, channel: RTCDataChannel) {
+  constructor(name: string, rootSchema: SchemaConstructor<T> | undefined, connection: RTCOfferingDataChannelPeerConnection) {
     super(name, rootSchema)
 
-    this.connection = new WebRTCConnection(connection, channel) as any
+    this.connection = new WebRTCConnection(connection) as any
   }
 
   public connect(endpoint: string) {
@@ -79,57 +79,20 @@ class WebRTCRoom<T> extends Room<T> {
 }
 
 export class WebRTCClient extends Client {
-  connection = new RTCPeerConnection()
-  channel?: RTCDataChannel
-  iceCandidates = [] as RTCIceCandidate[]
+  connection?: RTCOfferingDataChannelPeerConnection
 
   protected createRoom<T>(roomName: string, rootSchema?: SchemaConstructor<T>) {
-    return new WebRTCRoom<T>(roomName, rootSchema, this.connection, this.channel!)
+    return new WebRTCRoom<T>(roomName, rootSchema, this.connection!)
   }
 
   public async consumeSeatReservation<T>(response: any, rootSchema?: SchemaConstructor<T>) {
     const { room, sessionId, rtcAnswer } = response
-    this.connection.setRemoteDescription(rtcAnswer)
 
-    this.connection.onicecandidate = ({ candidate }) => {
-      if (candidate) {
-        this.iceCandidates.push(candidate)
-      }
-    }
-
-    this.connection.onicegatheringstatechange = async () => {
-      const options = {
-        sessionId,
-        candidates: this.iceCandidates,
-      } as any
-
-      if (this.connection.iceGatheringState === 'complete') {
-        const url = `${this.endpoint.replace('ws', 'http')}/matchmake/shareICECandidates/${room.name}`
-
-        // automatically forward auth token, if present
-        if (this.auth.hasToken) {
-          options.token = this.auth.token
-        }
-
-        const response = (
-          await post(url, {
-            headers: {
-              'Accept': 'application/json',
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify(options),
-          })
-        ).data
-
-        if (response.error) {
-          throw new MatchMakeError(response.error, response.code)
-        }
-
-        for (const candidate of response.candidates) {
-          this.connection.addIceCandidate(candidate)
-        }
-      }
-    }
+    await this.shareICECandidates({
+      sessionId,
+      roomName: room.name,
+      candidates: await this.connection!.connect(rtcAnswer),
+    })
 
     return super.consumeSeatReservation(response, rootSchema)
   }
@@ -140,15 +103,8 @@ export class WebRTCClient extends Client {
     options: JoinOptions = {},
     rootSchema?: SchemaConstructor<T>,
   ) {
-    this.channel = this.connection.createDataChannel('')
-    this.channel.binaryType = 'arraybuffer'
-
-    await new Promise(resolve => {
-      this.connection.onnegotiationneeded = resolve
-    })
-
-    const rtcOffer = await this.connection.createOffer()
-    this.connection.setLocalDescription(rtcOffer)
+    const [connection, rtcOffer] = await RTCOfferingDataChannelPeerConnection.create()
+    this.connection = connection
 
     return super.createMatchMakeRequest(
       method,
@@ -159,5 +115,30 @@ export class WebRTCClient extends Client {
       },
       rootSchema,
     )
+  }
+
+  private async shareICECandidates(options: { sessionId: string, roomName: string, candidates: RTCIceCandidate[], token?: any }) {
+    const url = `${this.endpoint.replace('ws', 'http')}/matchmake/shareICECandidates/${options.roomName}`
+
+    // automatically forward auth token, if present
+    if (this.auth.hasToken) {
+      options.token = this.auth.token
+    }
+
+    const response = (
+      await post(url, {
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(options),
+      })
+    ).data
+
+    if (response.error) {
+      throw new MatchMakeError(response.error, response.code)
+    }
+
+    this.connection!.addIceCandidates(...response.candidates)
   }
 }

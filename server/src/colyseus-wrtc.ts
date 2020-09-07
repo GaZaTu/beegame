@@ -8,6 +8,7 @@ import { Protocol, getMessageBytes } from 'colyseus/lib/Protocol'
 import { SeatReservation } from 'colyseus/lib/MatchMaker'
 import * as wrtc from 'wrtc'
 import * as arrayBufferToBuffer from 'arraybuffer-to-buffer'
+import { RTCAnsweringDataChannelPeerConnection } from './wrtc-server'
 
 Object.assign(globalThis, wrtc)
 
@@ -132,7 +133,7 @@ class WebRTCTransport extends Transport {
   static PING = 1
   static PONG = 2
 
-  connections = new Map<string, (RTCPeerConnection & { pingCount?: number, candidates?: RTCIceCandidate[], channel?: RTCDataChannel })>()
+  connections = new Map<string, (RTCAnsweringDataChannelPeerConnection & { pingCount?: number })>()
 
   pingInterval?: NodeJS.Timer
   pingIntervalMS: number
@@ -200,7 +201,7 @@ class WebRTCTransport extends Transport {
     }, pingInterval)
   }
 
-  async addConnection(connection: RTCPeerConnection & { pingCount?: number, candidates?: RTCIceCandidate[], channel?: RTCDataChannel }, seatReservation: SeatReservation) {
+  async addConnection(connection: RTCAnsweringDataChannelPeerConnection & { pingCount?: number }, seatReservation: SeatReservation) {
     this.connections.set(seatReservation.sessionId, connection)
 
     const sessionId = seatReservation.sessionId
@@ -208,34 +209,26 @@ class WebRTCTransport extends Transport {
 
     const room = matchMaker.getRoomById(roomId)
 
-    connection.onicecandidate = ({ candidate }) => {
-      if (candidate) {
-        connection.candidates = connection.candidates ?? []
-        connection.candidates.push(candidate)
+    await connection.onChannelOpen
+
+    connection.channel!.send(new Uint8Array([WebRTCTransport.PING]))
+    connection.channel!.addEventListener('message', ev => {
+      if (new Uint8Array(ev.data)[0] === WebRTCTransport.PONG) {
+        connection.pingCount = 0
       }
-    }
+    })
 
-    connection.ondatachannel = async ({ channel }) => {
-      connection.channel = channel
-      connection.channel.send(new Uint8Array([WebRTCTransport.PING]))
-      connection.channel.addEventListener('message', ev => {
-        if (new Uint8Array(ev.data)[0] === WebRTCTransport.PONG) {
-          connection.pingCount = 0
-        }
-      })
+    const client = new WebRTCClient(sessionId, WebRTCClient.modifyDataChannel(connection.channel!))
 
-      const client = new WebRTCClient(sessionId, WebRTCClient.modifyDataChannel(channel))
-
-      try {
-        if (!room || !room.hasReservedSeat(sessionId)) {
-          throw new Error('seat reservation expired.')
-        }
-
-        await room._onJoin(client, undefined)
-      } catch (e) {
-        client.error(e.code, e.message)
-        connection.close()
+    try {
+      if (!room || !room.hasReservedSeat(sessionId)) {
+        throw new Error('seat reservation expired.')
       }
+
+      await room._onJoin(client, undefined)
+    } catch (e) {
+      client.error(e.code, e.message)
+      connection.close()
     }
   }
 }
@@ -247,10 +240,7 @@ export class WebRTCServer extends Server {
     super(options)
 
     interceptMatchMaker(async (roomName, { rtcOffer }, seatReservation) => {
-      const connection = new RTCPeerConnection()
-      connection.setRemoteDescription(rtcOffer)
-      const rtcAnswer = await connection.createAnswer()
-      connection.setLocalDescription(rtcAnswer)
+      const [connection, rtcAnswer] = await RTCAnsweringDataChannelPeerConnection.fromOffer(rtcOffer)
 
       Object.assign(seatReservation, { rtcAnswer })
 
@@ -260,9 +250,7 @@ export class WebRTCServer extends Server {
       ; (matchMaker as any).shareICECandidates = async (roomName: string, { sessionId, candidates }: any | undefined) => {
         for (const [id, connection] of this.transport.connections) {
           if (id === sessionId) {
-            for (const candidate of candidates) {
-              await connection.addIceCandidate(candidate)
-            }
+            await connection.addIceCandidates(...candidates)
 
             return {
               candidates: connection.candidates,
