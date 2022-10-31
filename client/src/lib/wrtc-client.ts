@@ -7,12 +7,12 @@ export class RTCOfferingDataChannelPeerConnection extends RTCPeerConnection {
   // step 1
   static async create() {
     const connection = new RTCOfferingDataChannelPeerConnection()
-    const offer = connection.createOffer()
+    const offer = await connection.createOffer()
 
     return [connection, offer] as const
   }
 
-  async createOffer() {
+  async createSessionOffer() {
     this._channel = this.createDataChannel('')
     this._channel.binaryType = 'arraybuffer'
 

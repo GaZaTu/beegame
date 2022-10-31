@@ -7,14 +7,14 @@ export class RTCAnsweringDataChannelPeerConnection extends RTCPeerConnection {
   private _onChannelOpen!: Promise<void>
 
   // step 2
-  static async fromOffer(offer: RTCSessionDescriptionInit) {
+  static async fromSessionOffer(offer: RTCSessionDescriptionInit) {
     const connection = new RTCAnsweringDataChannelPeerConnection()
-    const answer = await connection.createAnswerFromOffer(offer)
+    const answer = await connection.createAnswerFromSessionOffer(offer)
 
     return [connection, answer] as const
   }
 
-  async createAnswerFromOffer(offer: RTCSessionDescriptionInit) {
+  async createAnswerFromSessionOffer(offer: RTCSessionDescriptionInit) {
     await this.setRemoteDescription(offer)
     const answer = await super.createAnswer()
     await this.setLocalDescription(answer)
@@ -68,11 +68,11 @@ export class RTCDataChannelServer {
   private _connections = new Set<RTCAnsweringDataChannelPeerConnection>()
 
   async createConnectionFromOffer(offer: RTCSessionDescriptionInit) {
-    const [connection, answer] = await RTCAnsweringDataChannelPeerConnection.fromOffer(offer)
-
-    this._connections.add(connection)
+    const [connection, answer] = await RTCAnsweringDataChannelPeerConnection.fromSessionOffer(offer)
 
     connection.onChannelOpen.then(() => {
+      this._connections.add(connection)
+
       connection.channel?.addEventListener('close', () => {
         this._connections.delete(connection)
       })
